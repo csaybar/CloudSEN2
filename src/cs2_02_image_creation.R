@@ -18,11 +18,11 @@ library(rgee)
 library(png)
 library(sf)
 library(sp)
-
+# devtools::install_github("r-spatial/rgee")
 set.seed(101)
 source("src/utils.R")
 
-ee_Initialize("csaybar")
+ee_Initialize("csaybar", drive = TRUE)
 
 # Load potential points
 local_cloudsen2_points <- read_sf("data/cloudsen2.geojson") %>% arrange(type)
@@ -30,7 +30,7 @@ create_potential_prob <- get_prob_by_class(local_cloudsen2_points) # potential p
 local_cloudsen2_points$potential_probability <-  create_potential_prob
 
 # index <- 30
-for (index in 1:1000) {
+for (index in 1:10) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   dataset_creator_chips(
     cloudsen2_row = cloudsen2_row,

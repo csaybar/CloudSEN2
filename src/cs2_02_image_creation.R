@@ -5,6 +5,7 @@
 #'
 #' @author Cesar Aybar <csaybar.github.io>
 #'
+#' devtools::install_github("r-spatial/rgee")
 
 library(tidyverse)
 library(jsonlite)
@@ -18,10 +19,9 @@ library(rgee)
 library(png)
 library(sf)
 library(sp)
-# devtools::install_github("r-spatial/rgee")
+
 set.seed(101)
 source("src/utils.R")
-
 ee_Initialize("csaybar", drive = TRUE)
 
 # Load potential points
@@ -34,7 +34,7 @@ for (index in 1:10) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   select_dataset_thumbnail_creator(
     cloudsen2_row = cloudsen2_row,
-    n_images = 10,
+    n_images = 5,
     kernel_size = c(255, 255),
     data_range = c("2019-01-01", "2020-07-31"),
     output = "results/"

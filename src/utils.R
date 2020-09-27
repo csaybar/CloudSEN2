@@ -974,7 +974,7 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
 
     # Convert data from list to data_frame
     message(
-      sprintf("Processing point %s image [%s] ... please wait",
+      sprintf("Processing point [%s] image [%s] ... please wait",
               cloudsen2_row$id, r_index)
     )
     band_names <- names(s2_img_array$features[[1]]$properties)
@@ -1005,7 +1005,7 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
   list_w_data$y <- y
   jsonlite::write_json(
       x = list_w_data,
-      path = sprintf("%s/cprob.json", dir_id),
+      path = sprintf("%s/cprob_%02d.json", dir_id, cloudsen2_row$id),
       pretty = TRUE,
       auto_unbox = TRUE
   )

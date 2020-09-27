@@ -947,10 +947,17 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
   img_crs <- s2Sr$first()$select(0)$projection()$getInfo()[["crs"]]
 
   # 4. Donwload the images
-  images_position <- sample(s2Sr$size()$getInfo(), n_images)
+  images_available <- s2Sr$size()$getInfo()
+  if (images_available < n_images) {
+    n_images <- images_available
+  }
+  images_position <- sample(images_available, n_images)
+
   # 4. Create folders to save results
-  dir_id <- sprintf("%s/point_%02d",output, cloudsen2_row$id)
+  dir_id <- sprintf("%s/point_%04d",output, cloudsen2_row$id)
   dir.create(dir_id, showWarnings = FALSE)
+  n_images <- seq_along(images_position)
+
   for (r_index in seq_along(images_position)) {
     # 4.1 Select the image to download
     img_to_download <- ee_get(s2Sr, images_position[r_index] - 1)$first()
@@ -984,12 +991,22 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
     plotRGB(final_stack/max_value, r = 3, g = 2, b = 1, scale = 1)
     dev.off()
   }
+
+  # Apologize my messy code! :3
+  xy <- cloudsen2_row[["geometry"]][[1]] %>% as.numeric()
+  x <- xy[1]
+  y <- xy[2]
   st_geometry(cloudsen2_row) <- NULL
-  cloudsen2_row %>%
+  list_w_data <- cloudsen2_row %>%
     dplyr::select(starts_with("pcloud")) %>%
-    as.list() %>%
-    jsonlite::write_json(
+    as.list()
+  names(list_w_data) <- sprintf("PUT_HERE_ID_%02d", 1:5)
+  list_w_data$x <- x
+  list_w_data$y <- y
+  jsonlite::write_json(
+      x = list_w_data,
       path = sprintf("%s/cprob.json", dir_id),
-      pretty = TRUE
-    )
+      pretty = TRUE,
+      auto_unbox = TRUE
+  )
 }

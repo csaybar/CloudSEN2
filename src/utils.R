@@ -1005,7 +1005,7 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
   list_w_data$y <- y
   jsonlite::write_json(
       x = list_w_data,
-      path = sprintf("%s/cprob_%02d.json", dir_id, cloudsen2_row$id),
+      path = sprintf("%s/cprob_%04d.json", dir_id, cloudsen2_row$id),
       pretty = TRUE,
       auto_unbox = TRUE
   )

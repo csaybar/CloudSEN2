@@ -30,11 +30,11 @@ local_cloudsen2_points <- read_sf("data/cloudsen2.geojson") %>%
   get_prob_by_class() # potential points
 
 
-for (index in 1:10) {
+for (index in 1:100) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   select_dataset_thumbnail_creator(
     cloudsen2_row = cloudsen2_row,
-    n_images = 5,
+    n_images = 50,
     kernel_size = c(255, 255),
     data_range = c("2019-01-01", "2020-07-31"),
     output = "results/"

@@ -948,17 +948,15 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
 
   # 4. Donwload the images
   images_available <- s2Sr$size()$getInfo()
-  if (images_available < n_images) {
-    n_images <- images_available
-  }
-  images_position <- sample(images_available, n_images)
+  images_position <- sample(images_available, images_available)
 
   # 4. Create folders to save results
   dir_id <- sprintf("%s/point_%04d",output, cloudsen2_row$id)
   dir.create(dir_id, showWarnings = FALSE)
-  n_images <- seq_along(images_position)
+  n_images_vector <- seq_along(images_position)
 
-  for (r_index in seq_along(images_position)) {
+  counter <- 0
+  for (r_index in seq_len(images_available)) {
     # 4.1 Select the image to download
     img_to_download <- ee_get(s2Sr, images_position[r_index] - 1)$first()
     img_id <- img_to_download$id()$getInfo()
@@ -973,13 +971,21 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
                              projection = img_crs,
                              scale = 10) %>%
       ee$FeatureCollection$getInfo()
-
     # Convert data from list to data_frame
+    band_names <- try(expr = names(s2_img_array$features[[1]]$properties),
+                      silent = TRUE)
+    if (class(band_names) == "try-error") {
+      next
+    } else {
+      if (counter == n_images) {
+        break
+      }
+      counter <- counter + 1
+    }
     message(
       sprintf("Processing point [%s] image [%s] ... please wait",
-              cloudsen2_row$id, r_index)
+              cloudsen2_row$id, counter)
     )
-    band_names <- names(s2_img_array$features[[1]]$properties)
     extract_fn <- function(x) as.numeric(unlist(s2_img_array$features[[1]]$properties[x]))
     image_as_df <- do.call(cbind,lapply(band_names, extract_fn))
     colnames(image_as_df) <- band_names

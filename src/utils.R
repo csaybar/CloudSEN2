@@ -1003,6 +1003,7 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
   names(list_w_data) <- sprintf("PUT_HERE_ID_%02d", 1:5)
   list_w_data$x <- x
   list_w_data$y <- y
+  list_w_data$comments <- "PUT_HERE_YOUR_COMMENT"
   jsonlite::write_json(
       x = list_w_data,
       path = sprintf("%s/cprob_%04d.json", dir_id, cloudsen2_row$id),

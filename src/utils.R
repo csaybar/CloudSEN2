@@ -969,7 +969,9 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
       ee$Image$neighborhoodToArray(
         kernel = ee$Kernel$rectangle(kernel_size[1], kernel_size[2], "pixels")
       ) %>%
-      ee$Image$sampleRegions(ee$FeatureCollection(point)) %>%
+      ee$Image$sampleRegions(ee$FeatureCollection(point),
+                             projection = img_crs,
+                             scale = 10) %>%
       ee$FeatureCollection$getInfo()
 
     # Convert data from list to data_frame

@@ -1019,3 +1019,32 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
       auto_unbox = TRUE
   )
 }
+
+metadata_dataset_creator <- function(cloudsen2_row,
+                                     output = "results/") {
+  dir_name_point <- sprintf("%s/point_%04d/", output, cloudsen2_row$id)
+  json_file <- sprintf("%s/cprob_%04d.json", dir_name_point, cloudsen2_row$id)
+  cprob <- jsonlite::read_json(json_file)
+  cprob_n <- names(cprob[1:5])
+  row_id <- gsub("cprob_|\\.json$", "", basename(json_file)) %>% as.numeric()
+  metadata_point <- local_cloudsen2_points[row_id,]
+  coord_xy <- as.numeric(metadata_point$geometry[[1]])
+  param_id <- list()
+  for (index in seq_along(cprob_n)) {
+    param_id[[index]] <- list(
+      cloud_type = NA,
+      cloud_height = NA,
+      cloud_thickness = NA
+    )
+  }
+  names(param_id) <- cprob_n
+  param_id$surface_type <- as.character(metadata_point$type)
+  param_id$x <- coord_xy[1]
+  param_id$y <- coord_xy[2]
+  jsonlite::write_json(
+    x = param_id,
+    path = sprintf("%s/metadata_%04d.json", dir_name_point, cloudsen2_row$id),
+    pretty = TRUE,
+    auto_unbox = TRUE
+  )
+}

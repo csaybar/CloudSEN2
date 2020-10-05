@@ -1104,3 +1104,41 @@ ee_get_s1 <- function(point, s2_date, range = 10, exclude = NULL) {
   row_position <- which.min(abs(s1_grd_id_filter$time_start - s2_date))
   s1_grd_id_filter[row_position,][["id"]]
 }
+
+ee_merge_s2_full <- function(s2_id) {
+  # 1. Create a S2 ImageCollection and filter by space and time.
+  s2_2a <- ee$Image(sprintf("COPERNICUS/S2_SR/%s", basename(s2_id)))
+  s2_1c <- ee$Image(sprintf("COPERNICUS/S2/%s", basename(s2_id)))
+
+  # 2. Create a S2_CLOUD_PROBABILITY ImageCollection filtering by space and time.
+  ## Cloud mask according to Zupanc et al. 2019
+  s2_cloud <- ee$Image(sprintf("COPERNICUS/S2_CLOUD_PROBABILITY/%s", basename(s2_id)))
+  boxcar1 <- ee$Kernel$square(radius = 4, units = 'pixels')
+  boxcar2 <- ee$Kernel$square(radius = 2, units = 'pixels')
+  s2cloudness_prob <- s2_cloud %>%
+    ee$Image$convolve(boxcar1) %>%
+    ee$Image$focal_max(kernel = boxcar2, iterations = 1) %>%
+    ee$Image$gte(70) %>%
+    ee$Image$rename("cmask_s2cloudness")
+
+  # 3. Estimate CDI
+  s2_cdi <- ee$Algorithms$Sentinel2$CDI(s2_1c)
+
+  # 4. Estimate CDI
+  ## 4,5,6,11 -> clear
+  ## 8,9,10 -> cloud
+  ## 2, 3 -> cloud shadows
+  ## 1, 7 -> no data
+  ## OBS: In Earth Engine "no data" values are masked out.
+  s2_scl <- s2_2a$select("SCL")$remap(
+    c(4, 5, 6, 11, 8, 9, 10, 2, 3, 1, 7),
+    c(0, 0, 0, 0, 1, 1, 1, 2, 2, 1, 1)
+  )$rename("cmask_sen2cor")
+
+  # 5. Merge S2_1C (B.*) + CDI +  S2_2A (SLC) and S2_CLOUD_PROBABILITY (cloud_prob)
+  s2_1c %>%
+    ee$Image$select("B.*") %>%
+    ee$Image$addBands(s2_cdi) %>%
+    ee$Image$addBands(s2cloudness_prob) %>%
+    ee$Image$addBands(s2_scl)
+}

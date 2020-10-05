@@ -53,11 +53,9 @@ for (index in 1:100) {
 # 4. Download images!
 for (index in 1:100) {
   cloudsen2_row <- local_cloudsen2_points[index,]
-  dataset_creator_chips(
+  dataset_creator_chips2(
     cloudsen2_row = cloudsen2_row,
     kernel_size = c(255, 255),
     output = "results/"
   )
 }
-
-read_json("/home/csaybar/Documents/Github/CloudSEN2/results/point_0001/metadata_0001.json")

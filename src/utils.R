@@ -1025,7 +1025,10 @@ metadata_dataset_creator <- function(cloudsen2_row,
   dir_name_point <- sprintf("%s/point_%04d/", output, cloudsen2_row$id)
   json_file <- sprintf("%s/cprob_%04d.json", dir_name_point, cloudsen2_row$id)
   cprob <- jsonlite::read_json(json_file)
+
   cprob_n <- names(cprob[1:5])
+  pprob_v <- as.numeric(cprob[1:5])
+
   row_id <- gsub("cprob_|\\.json$", "", basename(json_file)) %>% as.numeric()
   metadata_point <- local_cloudsen2_points[row_id,]
   coord_xy <- as.numeric(metadata_point$geometry[[1]])
@@ -1034,17 +1037,70 @@ metadata_dataset_creator <- function(cloudsen2_row,
     param_id[[index]] <- list(
       cloud_type = NA,
       cloud_height = NA,
-      cloud_thickness = NA
+      cloud_thickness = NA,
+      potential_cloud_coverage = pprob_v[index]
     )
   }
   names(param_id) <- cprob_n
   param_id$surface_type <- as.character(metadata_point$type)
   param_id$x <- coord_xy[1]
   param_id$y <- coord_xy[2]
+  param_id$comments <- cprob$comments
   jsonlite::write_json(
     x = param_id,
     path = sprintf("%s/metadata_%04d.json", dir_name_point, cloudsen2_row$id),
     pretty = TRUE,
     auto_unbox = TRUE
   )
+}
+
+ee_get_s1 <- function(point, s2_date, range = 10, exclude = NULL) {
+  # 1. Defining range and ref kernel
+  ee_new_kernel <- point$buffer(10*255)$bounds()
+  s1_date_search <- list(
+    init_date = (s2_date - lubridate::days(range)) %>% rdate_to_eedate(),
+    last_date = (s2_date + lubridate::days(range)) %>% rdate_to_eedate()
+  )
+
+  # 2. Load S1 data
+  s1_grd <- ee$ImageCollection("COPERNICUS/S1_GRD") %>%
+    ee$ImageCollection$filterBounds(point) %>%
+    ee$ImageCollection$filterDate(s1_date_search[[1]], s1_date_search[[2]]) %>%
+    # Filter to get images with VV and VH dual polarization.
+    ee$ImageCollection$filter(ee$Filter$listContains("transmitterReceiverPolarisation", "VV")) %>%
+    ee$ImageCollection$filter(ee$Filter$listContains('transmitterReceiverPolarisation', "VH")) %>%
+    # Filter to get images collected in interferometric wide swath mode.
+    ee$ImageCollection$filter(ee$Filter$eq("instrumentMode", "IW"))
+
+  # 3. get dates and ID
+  s1_grd_id <- ee_get_date_ic(s1_grd)
+
+  # 4. get number of pixels
+  npixels_data <- s1_grd %>%
+    ee$ImageCollection$map(
+      function(img) {
+        ee_reducer <- ee$Reducer$count()
+        prop <- ee$Image$reduceRegion(
+          image = img$select("VH"),
+          reducer = ee_reducer,
+          geometry = ee_new_kernel
+        )
+        img %>% ee$Image$set(list(npixels = prop))
+      }
+    ) %>%
+    ee$ImageCollection$aggregate_array("npixels") %>%
+    ee$Array$getInfo() %>%
+    unlist() %>%
+    as.numeric()
+
+  # 5. Only full scene 512x512
+  s1_grd_id$n_pixels <- npixels_data
+  s1_grd_id_filter <- s1_grd_id %>% filter(n_pixels > 259000)
+  if (!is.null(exclude)) {
+    s1_grd_id_filter <- s1_grd_id_filter[!(s1_grd_id_filter$id %in% exclude),]
+  }
+
+  # 6. Get the nearest image
+  row_position <- which.min(abs(s1_grd_id_filter$time_start - s2_date))
+  s1_grd_id_filter[row_position,][["id"]]
 }

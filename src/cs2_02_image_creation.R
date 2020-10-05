@@ -29,7 +29,7 @@ local_cloudsen2_points <- read_sf("data/cloudsen2.geojson") %>%
   arrange(type) %>%
   get_prob_by_class() # potential points
 
-# 2. Clasify images in clear, almost clear, low-cloudy, mid-cloudy, cloudy
+# 2. Classify images in clear, almost clear, low-cloudy, mid-cloudy, cloudy
 for (index in 1:100) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   select_dataset_thumbnail_creator(
@@ -55,9 +55,9 @@ for (index in 1:100) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   dataset_creator_chips(
     cloudsen2_row = cloudsen2_row,
-    bands = "B.*|probability|SCL",
     kernel_size = c(255, 255),
-    data_range = c("2019-01-01", "2020-07-31"),
     output = "results/"
   )
 }
+
+read_json("/home/csaybar/Documents/Github/CloudSEN2/results/point_0001/metadata_0001.json")

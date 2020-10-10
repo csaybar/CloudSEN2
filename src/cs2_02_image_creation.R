@@ -25,9 +25,11 @@ source("src/utils.R")
 ee_Initialize("csaybar", drive = TRUE)
 
 # 1. Load points with desired cloud average
-local_cloudsen2_points <- read_sf("data/cloudsen2.geojson") %>%
-  arrange(type) %>%
-  get_prob_by_class() # potential points
+# local_cloudsen2_points <- read_sf("data/cloudsen2.geojson") %>%
+#   arrange(type) %>%
+#   get_prob_by_class() # potential points
+# write_sf(local_cloudsen2_points, "data/cloudsen2_prob.geojson")
+local_cloudsen2_points <- read_sf("data/cloudsen2_points_corrected.geojson")
 
 # 2. Classify images in clear, almost clear, low-cloudy, mid-cloudy, cloudy
 for (index in 1:100) {
@@ -36,21 +38,12 @@ for (index in 1:100) {
     cloudsen2_row = cloudsen2_row,
     n_images = 50,
     kernel_size = c(255, 255),
-    data_range = c("2019-01-01", "2020-07-31"),
+    data_range = c("2018-01-01", "2020-07-31"),
     output = "results/"
   )
 }
 
-# 3. Generated metadata of selected images
-for (index in 1:100) {
-  cloudsen2_row <- local_cloudsen2_points[index,]
-  metadata_dataset_creator(
-    cloudsen2_row = cloudsen2_row,
-    output = "results/"
-  )
-}
-
-# 4. Download images!
+# 3. Download images!
 for (index in 1:100) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   dataset_creator_chips2(

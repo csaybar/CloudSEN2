@@ -935,31 +935,51 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
                                              kernel_size = c(255, 255),
                                              data_range = c("2019-01-01", "2020-07-31"),
                                              output = "results/") {
+  dir.create("results",showWarnings = FALSE)
   # 1. Create a point which represent the center of the chip
   point <- ee$Geometry$Point(cloudsen2_row$geometry[[1]])
 
-  # 2. Create a S2 ImageCollection with all the necessary images.
+  # 2. Create a S2/S1 ImageCollection with all the necessary images.
   s2Sr <- ee$ImageCollection("COPERNICUS/S2_SR") %>%
     ee$ImageCollection$filterBounds(point) %>%
     ee$ImageCollection$filterDate(data_range[1], data_range[2])
 
+  data_range2 <- c(as.Date(data_range[1]) - 5, as.Date(data_range[2]) + 5) %>% as.character()
+  s1_grd <- ee$ImageCollection("COPERNICUS/S1_GRD") %>%
+    ee$ImageCollection$filterBounds(point) %>%
+    ee$ImageCollection$filterDate(data_range2[1], data_range2[2]) %>%
+    # Filter to get images with VV and VH dual polarization.
+    ee$ImageCollection$filter(ee$Filter$listContains("transmitterReceiverPolarisation", "VV")) %>%
+    ee$ImageCollection$filter(ee$Filter$listContains('transmitterReceiverPolarisation', "VH")) %>%
+    # Filter to get images collected in interferometric wide swath mode.
+    ee$ImageCollection$filter(ee$Filter$eq("instrumentMode", "IW"))
+
+  s2_dates <- ee_get_date_ic(s2Sr) %>% as_tibble()
+  s1_dates <- ee_get_date_ic(s1_grd) %>% as_tibble()
+  sx_fx <- function(x) min(abs(s2_dates$time_start[x] - s1_dates$time_start))
+  mindays <- sapply(seq_len(nrow(s2_dates)), sx_fx)
+  valid_s2 <- s2_dates[mindays < 2.5,] # Pick up images with no more than 2.5 days of delay
+  message(sprintf("Number of images: %s", nrow(valid_s2)))
   # 3. Create a S2 ImageCollection with all the necessary images.
   img_crs <- s2Sr$first()$select(0)$projection()$getInfo()[["crs"]]
 
   # 4. Donwload the images
-  images_available <- s2Sr$size()$getInfo()
-  images_position <- sample(images_available, images_available)
-
+  images_position <- sample(nrow(valid_s2), nrow(valid_s2))
+  if (length(images_position) < 50) {
+    warning("Insufficient number of images ... PLEASE REPORT!")
+  }
   # 4. Create folders to save results
   dir_id <- sprintf("%s/point_%04d",output, cloudsen2_row$id)
   dir.create(dir_id, showWarnings = FALSE)
-  n_images_vector <- seq_along(images_position)
 
   counter <- 0
-  for (r_index in seq_len(images_available)) {
+  for (r_index in images_position) {
+    if (counter == n_images) {
+      break
+    }
     # 4.1 Select the image to download
-    img_to_download <- ee_get(s2Sr, images_position[r_index] - 1)$first()
-    img_id <- img_to_download$id()$getInfo()
+    img_to_download <- ee$Image(valid_s2$id[r_index])
+    img_id <- basename(valid_s2$id[r_index])
     s2_img_array <- img_to_download %>%
       ee$Image$select(c("B4", "B3", "B2")) %>%
       ee$Image$addBands(ee$Image$pixelCoordinates(projection = img_crs)) %>%
@@ -972,16 +992,17 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
                              scale = 10) %>%
       ee$FeatureCollection$getInfo()
     # Convert data from list to data_frame
-    band_names <- try(expr = names(s2_img_array$features[[1]]$properties),
-                      silent = TRUE)
+
+    # Sometimes points are not related to images .....
+    band_names <- try(
+      expr = names(s2_img_array$features[[1]]$properties),
+      silent = TRUE
+    )
+
     if (class(band_names) == "try-error") {
       next
-    } else {
-      if (counter == n_images) {
-        break
-      }
-      counter <- counter + 1
     }
+
     message(
       sprintf("Processing point [%s] image [%s] ... please wait",
               cloudsen2_row$id, counter)
@@ -990,9 +1011,19 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
     image_as_df <- do.call(cbind,lapply(band_names, extract_fn))
     colnames(image_as_df) <- band_names
     image_as_tibble <- as_tibble(image_as_df)
+
+    # If image have zero values next
+    if (sum(image_as_tibble[["B2"]] == 0) > 0) {
+      next
+    } else {
+      counter <- counter + 1
+    }
+
     coordinates(image_as_tibble) <- ~x+y
     sf_to_stack <- function(x) rasterFromXYZ(image_as_tibble[x])
     final_stack <- stack(lapply(names(image_as_tibble), sf_to_stack))
+
+
     crs(final_stack) <- st_crs(img_crs)$proj4string
     png(sprintf("%s/%s.png", dir_id, img_id), 1000, 1000)
     max_value <- max(maxValue(final_stack))
@@ -1018,6 +1049,12 @@ select_dataset_thumbnail_creator <- function(cloudsen2_row,
       pretty = TRUE,
       auto_unbox = TRUE
   )
+  metadata_dataset_creator(
+    cloudsen2_row = cloudsen2_row,
+    output = output
+  )
+  Sys.sleep(0.1)
+  file.remove(sprintf("%s/cprob_%04d.json", dir_id, cloudsen2_row$id))
 }
 
 metadata_dataset_creator <- function(cloudsen2_row,
@@ -1054,7 +1091,7 @@ metadata_dataset_creator <- function(cloudsen2_row,
   )
 }
 
-ee_get_s1 <- function(point, s2_date, range = 10, exclude = NULL) {
+ee_get_s1 <- function(point, s2_date, range = 60, exclude = NULL) {
   # 1. Defining range and ref kernel
   ee_new_kernel <- point$buffer(10*255)$bounds()
   s1_date_search <- list(
@@ -1073,7 +1110,13 @@ ee_get_s1 <- function(point, s2_date, range = 10, exclude = NULL) {
     ee$ImageCollection$filter(ee$Filter$eq("instrumentMode", "IW"))
 
   # 3. get dates and ID
-  s1_grd_id <- ee_get_date_ic(s1_grd)
+  s1_grd_id <- tryCatch(
+    expr = ee_get_date_ic(s1_grd),
+    error = function(e) {
+      message("No Sentinel-1 image was found in a range of 2 months")
+      stop(e)
+    }
+  )
 
   # 4. get number of pixels
   npixels_data <- s1_grd %>%
@@ -1095,7 +1138,7 @@ ee_get_s1 <- function(point, s2_date, range = 10, exclude = NULL) {
 
   # 5. Only full scene 512x512
   s1_grd_id$n_pixels <- npixels_data
-  s1_grd_id_filter <- s1_grd_id %>% filter(n_pixels > 259000)
+  s1_grd_id_filter <- s1_grd_id %>% filter(n_pixels > 250000)
   if (!is.null(exclude)) {
     s1_grd_id_filter <- s1_grd_id_filter[!(s1_grd_id_filter$id %in% exclude),]
   }
@@ -1105,21 +1148,32 @@ ee_get_s1 <- function(point, s2_date, range = 10, exclude = NULL) {
   s1_grd_id_filter[row_position,][["id"]]
 }
 
-ee_merge_s2_full <- function(s2_id) {
+ee_merge_s2_full <- function(s2_id, s1_id, s2_date) {
+  year <- format(as.Date(s2_date), "%Y-01-01") %>% as.Date()
+  year_chr <- c(year - 1 , year + 1) %>% as.character()
+
   # 1. Create a S2 ImageCollection and filter by space and time.
+  s1_grd <- ee$Image(s1_id)
   s2_2a <- ee$Image(sprintf("COPERNICUS/S2_SR/%s", basename(s2_id)))
   s2_1c <- ee$Image(sprintf("COPERNICUS/S2/%s", basename(s2_id)))
+  extra_dem <- ee$Image("MERIT/Hydro/v1_0_1")$select("elv")
+  extra_LC <- ee$ImageCollection("COPERNICUS/Landcover/100m/Proba-V-C3/Global") %>%
+    ee$ImageCollection$filterDate(year_chr[1] , year_chr[2]) %>%
+    ee$ImageCollection$first() %>%
+    ee$Image$select("discrete_classification") %>%
+    ee$Image$rename("land_cover")
 
   # 2. Create a S2_CLOUD_PROBABILITY ImageCollection filtering by space and time.
   ## Cloud mask according to Zupanc et al. 2019
   s2_cloud <- ee$Image(sprintf("COPERNICUS/S2_CLOUD_PROBABILITY/%s", basename(s2_id)))
   boxcar1 <- ee$Kernel$square(radius = 4, units = 'pixels')
   boxcar2 <- ee$Kernel$square(radius = 2, units = 'pixels')
-  s2cloudness_prob <- s2_cloud %>%
+  s2cloudness_prob <- s2_cloud$rename("cmask_s2cloudness")
+  s2cloudness_prob_reclass <- s2_cloud %>%
     ee$Image$convolve(boxcar1) %>%
     ee$Image$focal_max(kernel = boxcar2, iterations = 1) %>%
     ee$Image$gte(70) %>%
-    ee$Image$rename("cmask_s2cloudness")
+    ee$Image$rename("cmask_s2cloudness_reclass")
 
   # 3. Estimate CDI
   s2_cdi <- ee$Algorithms$Sentinel2$CDI(s2_1c)
@@ -1130,15 +1184,257 @@ ee_merge_s2_full <- function(s2_id) {
   ## 2, 3 -> cloud shadows
   ## 1, 7 -> no data
   ## OBS: In Earth Engine "no data" values are masked out.
-  s2_scl <- s2_2a$select("SCL")$remap(
+  s2_scl <- s2_2a$select("SCL")$rename("cmask_sen2cor")
+  s2_scl_reclass <- s2_2a$select("SCL")$remap(
     c(4, 5, 6, 11, 8, 9, 10, 2, 3, 1, 7),
     c(0, 0, 0, 0, 1, 1, 1, 2, 2, 1, 1)
-  )$rename("cmask_sen2cor")
+  )$rename("cmask_sen2cor_reclass")
 
   # 5. Merge S2_1C (B.*) + CDI +  S2_2A (SLC) and S2_CLOUD_PROBABILITY (cloud_prob)
   s2_1c %>%
     ee$Image$select("B.*") %>%
+    ee$Image$addBands(s1_grd) %>%
     ee$Image$addBands(s2_cdi) %>%
     ee$Image$addBands(s2cloudness_prob) %>%
-    ee$Image$addBands(s2_scl)
+    ee$Image$addBands(s2cloudness_prob_reclass) %>%
+    ee$Image$addBands(s2_scl) %>%
+    ee$Image$addBands(s2_scl_reclass) %>%
+    ee$Image$addBands(extra_dem) %>%
+    ee$Image$addBands(extra_LC)
+}
+
+dataset_creator_chips2 <- function(cloudsen2_row,
+                                   kernel_size = c(255, 255),
+                                   output = "results/") {
+  # 1. Create a point which represent the center of the chip
+  point <- ee$Geometry$Point(cloudsen2_row$geometry[[1]])
+
+  # 2. Read metadata
+  dir_name_point <- sprintf("%s/point_%04d/", output, cloudsen2_row$id)
+  metadata_json <- sprintf("%s/metadata_%04d.json", dir_name_point, cloudsen2_row$id)
+  s2_ids <- sprintf("COPERNICUS/S2/%s", names(jsonlite::read_json(metadata_json))[1:5])
+  # s2_id <- s2_ids[1]
+  # 3. Download each image at each point
+  for (s2_id in s2_ids) {
+    message(sprintf("Downloading: %s", s2_id))
+    # 3.1 S2 ID and dates
+    s2_img <- ee$Image(s2_id)
+    # Map$centerObject(s2_img)
+    # Map$addLayer(s2_img, list(min=0, max=10000, bands = c("B4","B3","B2"))) +
+    # Map$addLayer(point)
+    s2_date <- ee_get_date_img(s2_img)[["time_start"]]
+
+    # 3.2 S1 ID and dates
+    s1_id <- ee_get_s1(point = point, s2_date = s2_date)
+    s1_img <- ee$Image(s1_id)
+    # Map$addLayer(s1_img)
+
+    # 3.3 Create a S2 Image with cloud mask information
+    s2_fullinfo <- ee_merge_s2_full(s2_id, s1_id, s2_date)
+    crs_kernel <- s2_fullinfo$select(0)$projection()$getInfo()$crs
+    point_utm <- st_transform(cloudsen2_row$geometry[1], crs_kernel)
+    ee_point <- ee$Geometry$Point(point_utm[[1]], proj = crs_kernel)
+
+    # 3.4 Create a 511x511 tile
+    band_names <- c(s2_fullinfo$addBands(s1_img)$bandNames()$getInfo(), "x", "y")
+    s2_img_array <- s2_fullinfo$addBands(s1_img) %>%
+      ee$Image$addBands(ee$Image$pixelCoordinates(projection = crs_kernel)) %>%
+      ee$Image$neighborhoodToArray(
+        kernel = ee$Kernel$rectangle(kernel_size[1], kernel_size[2], "pixels")
+      ) %>%
+      ee$Image$sampleRegions(ee$FeatureCollection(point),
+                             projection = crs_kernel,
+                             scale = 10) %>%
+      ee$FeatureCollection$getInfo()
+    extract_fn <- function(x) as.numeric(unlist(s2_img_array$features[[1]]$properties[x]))
+    image_as_df <- do.call(cbind,lapply(band_names, extract_fn))
+    colnames(image_as_df) <- band_names
+    image_as_tibble <- as_tibble(image_as_df)
+    coordinates(image_as_tibble) <- ~x+y
+    sf_to_stack <- function(x) rasterFromXYZ(image_as_tibble[x])
+    final_stack <- stack(lapply(names(image_as_tibble), sf_to_stack))
+    crs(final_stack) <- st_crs(crs_kernel)$proj4string
+
+    ### Prepare data for iris ------------------------
+    output_final <- "final_results/"
+    output_final_d <- "final_results/images"
+    output_final_folder <- sprintf("%s/images/%s", output_final, basename(s2_id))
+    metadata_final <- sprintf("%s/cloud-segmentation.json", output_final)
+
+    metadata_spec <- sprintf("%s/images/%s/metadata.json", output_final, basename(s2_id))
+    raster_spec <- sprintf("%s/images/%s/s2.tif", output_final, basename(s2_id))
+
+    dir.create(output_final, showWarnings = FALSE)
+    dir.create(output_final_d, showWarnings = FALSE)
+    dir.create(output_final_folder, showWarnings = FALSE)
+
+    # Create JSON
+    ee_create_cloudseg(metadata_final)
+    ee_create_metadata(
+      id = basename(s2_id),
+      point = rev(as.numeric(cloudsen2_row$geometry[[1]])),
+      path = metadata_spec
+    )
+    nlen <- length(names(final_stack))
+    full_data <- stack(final_stack[[1:13]]/10000, final_stack[[14:nlen]])
+    writeRaster(x = full_data, filename = raster_spec, overwrite = TRUE)
+  }
+}
+
+
+ee_create_cloudseg <- function(path) {
+  cseg_list <- list(
+    name = "cloud-segmentation",
+    authentication_required = TRUE,
+    images = list(
+      path = list(
+        Sentinel2 = "images/{id}/s2.tif"
+      ),
+      shape = c(511,511),
+      thumbnails = "images/{id}/thumbnail.png",
+      metadata = "images/{id}/metadata.json"
+    ),
+    segmentation = list(
+      path = "images/{id}/mask.png",
+      mask_encoding = "rgb",
+      mask_area = c(0, 0, 511, 511),
+      score = "f1",
+      pending_threshold = 1,
+      test_images = NA
+    ),
+    classes = list(
+      list(
+        name = "Clear",
+        description = "All clear pixels, i.e. without cloud contamination or cloud shadows.",
+        colour = c(255,255,255,0),
+        user_colour = c(0,255,255,70)
+      ),
+      list(
+        name = "Thick Cloud",
+        description = "All cloudy pixels covered by thick clouds (does not include semi-transparent clouds or cloud shadows).",
+        colour = c(255, 255, 0, 70)
+      ),
+      list(
+        name = "Thin Cloud",
+        description = "Clouds that are semi-transparent, i.e. one can see land or sea surfaces through them. If a thin cloud lays over a thick cloud, please paint them with the <i>Thick Cloud</i> class.",
+        colour = c(0, 255, 0, 70)
+      ),
+      list(
+        name = "Cloud Shadows",
+        description = "All pixels contaminated by cloud shadows (not terrain shadows).",
+        colour = c(255, 0, 0, 70)
+      ),
+      list(
+        name = "No data",
+        description = "Reserved for no data pixels, e.g. pixels outside of the satellite's swath.",
+        colour = c(50, 50, 255, 70)
+      )
+    ),
+    views = list(
+      Cirrus = list(
+        description = "Cirrus and high clouds are red.",
+        type = "image",
+        data = "$Sentinel2.B11**0.8*5",
+        cmap = "jet"
+      ),
+      "Cirrus-Edges" = list(
+        "description" = "Edges in the cirrus band",
+        "type" = "image",
+        "data" = "edges($Sentinel2.B11**0.8*5)*1.5",
+        "cmap" = "gray"
+      ),
+      RGB = list(
+        "description" = "Normal RGB image.",
+        "type" = "image",
+        "data" = c("$Sentinel2.B5", "$Sentinel2.B3", "$Sentinel2.B2")
+      ),
+      NRGB = list(
+        description = "Near-Infrared RGB image.",
+        type = "image",
+        data = c("$Sentinel2.B5*1.5", "$Sentinel2.B3*1.5", "$Sentinel2.B2*1.5")
+      ),
+      Edges = list(
+        description = "Edges in the panchromatic bands",
+        type = "image",
+        data = "edges($Sentinel2.B2+$Sentinel2.B3+$Sentinel2.B4)",
+        cmap = "gray"
+      ),
+      Snow = list(
+        description = "Small ice crystals in high-level clouds appear reddish-orange or peach, and thick ice snow looks vivid red (or red-orange). Bare soil appears bright cyan and vegetation seem greenish in the image. Water on the ground is very dark as it absorbs the SWIR and the red, but small (liquid) water drops in the clouds scatter the light equally in both visible and the SWIR, and therefore it appears white. Water Sediments are displayed as dark red.",
+        type = "image",
+        data = c("$Sentinel2.B1", "$Sentinel2.B12", "$Sentinel2.B13")
+      ),
+      "Sentinel-1" = list(
+        description = "RGB of VH, VV and VH-VV.",
+        type = "image",
+        data = c("$Sentinel1.B14", "$Sentinel1.B15", "$Sentinel1.B14-$Sentinel1.B15")
+      ),
+      Superpixels = list(
+        description = "Superpixels in the panchromatic bands",
+        type = "image",
+        data = "superpixels($Sentinel2.B2+$Sentinel2.B3+$Sentinel2.B4, sigma=4, min_size=100)",
+        cmap = "jet"
+      ),
+      Bing = list(
+        description = "Aerial Imagery",
+        type = "bingmap"
+      )
+    ),
+    view_groups = list(
+      default = c("Cirrus", "RGB", "Snow", "Sentinel-1"),
+      radar = "Sentinel-1"
+    )
+  )
+  jsonlite::write_json(
+    x = cseg_list,
+    path = path,
+    pretty = TRUE,
+    auto_unbox = TRUE
+  )
+}
+
+ee_create_metadata <- function(id, point, path) {
+  scene_list <- list(
+    spacecraft_id = "Sentinel2/Sentinel1",
+    scene_id = id,
+    location = point,
+    resolution = 10.0
+  )
+  jsonlite::write_json(
+    x = scene_list,
+    path = path,
+    pretty = TRUE,
+    auto_unbox = TRUE
+  )
+}
+
+black_area_detector <- function(cloudsen2_row = cloudsen2_row,
+                                kernel_size = c(255, 255),
+                                data_range = c("2019-01-01", "2020-07-31"),
+                                output = "results/") {
+  # 1. Defining range and ref kernel
+  point <- ee$Geometry$Point(cloudsen2_row$geometry[[1]])
+  ee_new_kernel <- point$buffer(10*255)$bounds()
+  s2_grd <- ee$ImageCollection("COPERNICUS/S2") %>%
+    ee$ImageCollection$filterBounds(point) %>%
+    ee$ImageCollection$filterDate(data_range[[1]], data_range[[2]])
+  s2_grd <- s2_grd %>% ee_get(0:49)
+  npixels_data <- s2_grd %>%
+    ee$ImageCollection$map(
+      function(img) {
+        ee_reducer <- ee$Reducer$count()
+        prop <- ee$Image$reduceRegion(
+          image = img$select(0),
+          reducer = ee_reducer,
+          geometry = ee_new_kernel,
+          scale = 10
+        )
+        img %>% ee$Image$set(list(npixels = prop))
+      }
+    ) %>%
+    ee$ImageCollection$aggregate_array("npixels") %>%
+    ee$Array$getInfo() %>%
+    unlist() %>%
+    as.numeric()
+  min(npixels_data) < 250000
 }

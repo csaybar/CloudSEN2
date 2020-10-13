@@ -1193,8 +1193,8 @@ ee_merge_s2_full <- function(s2_id, s1_id, s2_date) {
   # 5. Merge S2_1C (B.*) + CDI +  S2_2A (SLC) and S2_CLOUD_PROBABILITY (cloud_prob)
   s2_1c %>%
     ee$Image$select("B.*") %>%
-    ee$Image$addBands(s1_grd) %>%
     ee$Image$addBands(s2_cdi) %>%
+    ee$Image$addBands(s1_grd) %>%
     ee$Image$addBands(s2cloudness_prob) %>%
     ee$Image$addBands(s2cloudness_prob_reclass) %>%
     ee$Image$addBands(s2_scl) %>%
@@ -1236,7 +1236,7 @@ dataset_creator_chips2 <- function(cloudsen2_row,
     ee_point <- ee$Geometry$Point(point_utm[[1]], proj = crs_kernel)
 
     # 3.4 Create a 511x511 tile
-    band_names <- c(s2_fullinfo$addBands(s1_img)$bandNames()$getInfo(), "x", "y")
+    band_names <- c(s2_fullinfo$bandNames()$getInfo(), "x", "y")
     s2_img_array <- s2_fullinfo$addBands(s1_img) %>%
       ee$Image$addBands(ee$Image$pixelCoordinates(projection = crs_kernel)) %>%
       ee$Image$neighborhoodToArray(
@@ -1262,7 +1262,8 @@ dataset_creator_chips2 <- function(cloudsen2_row,
     metadata_final <- sprintf("%s/cloud-segmentation.json", output_final)
 
     metadata_spec <- sprintf("%s/images/%s/metadata.json", output_final, basename(s2_id))
-    raster_spec <- sprintf("%s/images/%s/s2.tif", output_final, basename(s2_id))
+    inputdata_spec <- sprintf("%s/images/%s/input.tif", output_final, basename(s2_id))
+    cloudmask_spec <- sprintf("%s/images/%s/target.tif", output_final, basename(s2_id))
 
     dir.create(output_final, showWarnings = FALSE)
     dir.create(output_final_d, showWarnings = FALSE)
@@ -1276,8 +1277,13 @@ dataset_creator_chips2 <- function(cloudsen2_row,
       path = metadata_spec
     )
     nlen <- length(names(final_stack))
-    full_data <- stack(final_stack[[1:13]]/10000, final_stack[[14:nlen]])
-    writeRaster(x = full_data, filename = raster_spec, overwrite = TRUE)
+
+    input_data <- raster::stack(
+      final_stack[[1:13]]/10000, final_stack[[14]], final_stack[[15:17]], final_stack[[22:23]]
+    )
+    benchmarch_data <- final_stack[[18:21]]
+    writeRaster(x = input_data, filename = inputdata_spec, overwrite = TRUE)
+    writeRaster(x = benchmarch_data, filename = cloudmask_spec, overwrite = TRUE)
   }
 }
 
@@ -1288,7 +1294,7 @@ ee_create_cloudseg <- function(path) {
     authentication_required = TRUE,
     images = list(
       path = list(
-        Sentinel2 = "images/{id}/s2.tif"
+        Sentinel2 = "images/{id}/input.tif"
       ),
       shape = c(511,511),
       thumbnails = "images/{id}/thumbnail.png",
@@ -1337,6 +1343,11 @@ ee_create_cloudseg <- function(path) {
         data = "$Sentinel2.B11**0.8*5",
         cmap = "jet"
       ),
+      cloud_index = list(
+        description = "Cloud Displacement Index, clouds are red.",
+        type = "image",
+        data = "$Sentinel2.B14"
+      ),
       "Cirrus-Edges" = list(
         "description" = "Edges in the cirrus band",
         "type" = "image",
@@ -1367,7 +1378,7 @@ ee_create_cloudseg <- function(path) {
       "Sentinel-1" = list(
         description = "RGB of VH, VV and VH-VV.",
         type = "image",
-        data = c("$Sentinel1.B14", "$Sentinel1.B15", "$Sentinel1.B14-$Sentinel1.B15")
+        data = c("$Sentinel2.B16", "$Sentinel2.B15", "$Sentinel2.B16-$Sentinel2.B15")
       ),
       Superpixels = list(
         description = "Superpixels in the panchromatic bands",
@@ -1381,8 +1392,7 @@ ee_create_cloudseg <- function(path) {
       )
     ),
     view_groups = list(
-      default = c("Cirrus", "RGB", "Snow", "Sentinel-1"),
-      radar = "Sentinel-1"
+      default = c("Cirrus", "RGB", "Snow")
     )
   )
   jsonlite::write_json(

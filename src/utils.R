@@ -695,6 +695,11 @@ add_S2cloud2 <- function(img) {
 # Determine the potential cloud probability desired
 get_prob_by_class <- function(local_cloudsen2_points) {
   colnames <- sprintf("pcloud_%02d",1:5)
+
+  punknown_cloud <- local_cloudsen2_points %>% filter(value == 0) %>% nrow()
+  unknown_td <- gen_rcloudpoints(punknown_cloud)  %>%
+    `colnames<-`(colnames)
+
   pbaren_cloud <- local_cloudsen2_points %>% filter(value == 1) %>% nrow()
   baren_td <- gen_rcloudpoints(pbaren_cloud)  %>%
     `colnames<-`(colnames)
@@ -731,7 +736,7 @@ get_prob_by_class <- function(local_cloudsen2_points) {
   wetlands_td <- gen_rcloudpoints(pwetlands_cloud)  %>%
     `colnames<-`(colnames)
 
-  complete_pprob <- rbind(baren_td,grass_td, shrubland_td, snow_td, tmforest_td,
+  complete_pprob <- rbind(unknown_td, baren_td,grass_td, shrubland_td, snow_td, tmforest_td,
                           trforest_td, urban_td, water_td, wetlands_td)
 
   cloudsen2_type <- local_cloudsen2_points$type
@@ -1150,6 +1155,9 @@ ee_get_s1 <- function(point, s2_date, range = 60, exclude = NULL) {
 
 ee_merge_s2_full <- function(s2_id, s1_id, s2_date) {
   year <- format(as.Date(s2_date), "%Y-01-01") %>% as.Date()
+  if (year == as.Date("2020-01-01")) {
+    year <- as.Date("2019-01-01")
+  }
   year_chr <- c(year - 1 , year + 1) %>% as.character()
 
   # 1. Create a S2 ImageCollection and filter by space and time.
@@ -1162,7 +1170,6 @@ ee_merge_s2_full <- function(s2_id, s1_id, s2_date) {
     ee$ImageCollection$first() %>%
     ee$Image$select("discrete_classification") %>%
     ee$Image$rename("land_cover")
-
   # 2. Create a S2_CLOUD_PROBABILITY ImageCollection filtering by space and time.
   ## Cloud mask according to Zupanc et al. 2019
   s2_cloud <- ee$Image(sprintf("COPERNICUS/S2_CLOUD_PROBABILITY/%s", basename(s2_id)))
@@ -1213,14 +1220,14 @@ dataset_creator_chips2 <- function(cloudsen2_row,
   dir_name_point <- sprintf("%s/point_%04d/", output, cloudsen2_row$id)
   metadata_json <- sprintf("%s/metadata_%04d.json", dir_name_point, cloudsen2_row$id)
   s2_ids <- sprintf("COPERNICUS/S2/%s", names(jsonlite::read_json(metadata_json))[1:5])
-  # s2_id <- s2_ids[1]
+  # s2_id <- s2_ids[2]
   # 3. Download each image at each point
   for (s2_id in s2_ids) {
     message(sprintf("Downloading: %s", s2_id))
     # 3.1 S2 ID and dates
     s2_img <- ee$Image(s2_id)
-    # Map$centerObject(s2_img)
-    # Map$addLayer(s2_img, list(min=0, max=10000, bands = c("B4","B3","B2"))) +
+    # Map$centerObject(point)
+    # map02 <- Map$addLayer(s2_img, list(min=0, max=10000, bands = c("B4","B3","B2"))) +
     # Map$addLayer(point)
     s2_date <- ee_get_date_img(s2_img)[["time_start"]]
 

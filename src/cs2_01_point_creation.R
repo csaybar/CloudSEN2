@@ -5,7 +5,7 @@ library(raster)
 library(tmap)
 library(rgee)
 library(sf)
-source("utils.R")
+source("src/utils.R")
 
 data("World")
 ee_Initialize("csaybar@gmail.com")
@@ -25,7 +25,6 @@ ee_task <- ee_image_to_asset(
   overwrite = TRUE,
   maxPixels = 10**13
 )
-
 ee_task$start()
 ee_monitoring()
 

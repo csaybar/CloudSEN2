@@ -29,10 +29,12 @@ ee_Initialize("csaybar", drive = TRUE)
 #   arrange(type) %>%
 #   get_prob_by_class() # potential points
 # write_sf(local_cloudsen2_points, "data/cloudsen2_prob.geojson")
-local_cloudsen2_points <- read_sf("data/cloudsen2_points_corrected.geojson")
+local_cloudsen2_points <- read_sf("data/newcloudsen2_points_corrected.geojson")
 
 # 2. Classify images in clear, almost clear, low-cloudy, mid-cloudy, cloudy
-for (index in 1:100) {
+# index <- 519
+# val <- c(622, 623, 624, 627, 632, 639, 640, 642, 650, 652, 656, 657, 659, 660, 662, 672, 673, 705)
+for (index in val) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   select_dataset_thumbnail_creator(
     cloudsen2_row = cloudsen2_row,

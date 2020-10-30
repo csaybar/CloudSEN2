@@ -1,7 +1,9 @@
 library(sf)
 library(rgee)
+
 ee_Initialize()
 source("src/utils.R")
+
 # 1. Donwload s2 tiles with statistic from http://eo-compass.zgis.at/geoserver/
 # 2. Points with problems
 ## no S1 images
@@ -85,18 +87,42 @@ new_cloud_points <- rbind(local_cloudsen2_points[,-9], new_points_f)
 write_sf(new_cloud_points, "data/newcloudsen2_points_corrected.geojson")
 
 # calibration
-files_json <- list.files("data/metadata/")
 set.seed(15)
+files_json <- list.files("data/metadata/", "\\.json$")
 cal_points <- sample(length(files_json), 10)
-file.copy(
-  sprintf("data/metadata/%s", files_json[cal_points]),
-  sprintf("data/validation/%s", files_json[cal_points])
-)
+for (index in seq_along(cal_points)) {
+  in_point <- files_json[cal_points[index]]
+  json_number <- gsub("metadata_|*.json", "", in_point) %>% as.numeric()
+  dir.create(
+    path = sprintf("data/calibration/point_%04d", json_number),
+    showWarnings = FALSE
+  )
+  file.copy(
+    from = sprintf("data/metadata/%s", in_point),
+    to = sprintf("data/calibration/point_%04d/%s", json_number, in_point)
+  )
+}
+
 
 # validation
 set.seed(25)
 val_points <- sample(length(files_json), 15)
-file.copy(
-  sprintf("data/metadata/%s", files_json[val_points]),
-  sprintf("data/calibration/%s", files_json[val_points])
-)
+for (index in seq_along(val_points)) {
+  in_point <- files_json[val_points[index]]
+  json_number <- gsub("metadata_|*.json", "", in_point) %>% as.numeric()
+  dir.create(
+    path = sprintf("data/validation/point_%04d", json_number),
+    showWarnings = FALSE
+  )
+  file.copy(
+    from = sprintf("data/metadata/%s", in_point),
+    to = sprintf("data/validation/point_%04d/%s", json_number, in_point)
+  )
+}
+
+
+# json_number <- gsub("metadata_|*.json", "", files_json[cal_points]) %>% as.numeric()
+# paste(json_number, collapse = ", ")
+
+# json_number <- gsub("metadata_|*.json", "", files_json[val_points]) %>% as.numeric()
+# paste(json_number, collapse = ", ")

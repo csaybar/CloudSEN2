@@ -32,8 +32,6 @@ ee_Initialize("csaybar", drive = TRUE)
 local_cloudsen2_points <- read_sf("data/newcloudsen2_points_corrected.geojson")
 
 # 2. Classify images in clear, almost clear, low-cloudy, mid-cloudy, cloudy
-# index <- 519
-# val <- c(622, 623, 624, 627, 632, 639, 640, 642, 650, 652, 656, 657, 659, 660, 662, 672, 673, 705)
 for (index in val) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   select_dataset_thumbnail_creator(
@@ -46,7 +44,9 @@ for (index in val) {
 }
 
 # 3. Download images!
-for (index in 1:100) {
+# val <- c(733, 560, 622, 527, 54, 84, 703, 320, 65, 310, 402, 793, 603, 534, 639)
+# cal <- c(635, 578, 980, 760, 588, 332, 200, 299, 252, 805)
+for (index in cal) {
   cloudsen2_row <- local_cloudsen2_points[index,]
   dataset_creator_chips2(
     cloudsen2_row = cloudsen2_row,
